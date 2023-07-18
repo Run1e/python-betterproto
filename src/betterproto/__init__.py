@@ -1,5 +1,5 @@
 import dataclasses
-import enum
+import enum as builtin_enum
 import json
 import math
 import struct
@@ -44,6 +44,7 @@ from .casing import (
     snake_case,
 )
 from .grpc.grpclib_client import ServiceStub
+from .enum import Enum
 
 
 # Proto 3 data types
@@ -136,7 +137,7 @@ NEG_INFINITY = "-Infinity"
 NAN = "NaN"
 
 
-class Casing(enum.Enum):
+class Casing(builtin_enum.Enum):
     """Casing constants for serialization."""
 
     CAMEL = camel_case  #: A camelCase sterilization function.
@@ -303,32 +304,6 @@ def map_field(
     return dataclass_field(
         number, TYPE_MAP, map_types=(key_type, value_type), group=group
     )
-
-
-class Enum(enum.IntEnum):
-    """
-    The base class for protobuf enumerations, all generated enumerations will inherit
-    from this. Bases :class:`enum.IntEnum`.
-    """
-
-    @classmethod
-    def from_string(cls, name: str) -> "Enum":
-        """Return the value which corresponds to the string name.
-
-        Parameters
-        -----------
-        name: :class:`str`
-            The name of the enum member to get
-
-        Raises
-        -------
-        :exc:`ValueError`
-            The member was not found in the Enum.
-        """
-        try:
-            return cls._member_map_[name]  # type: ignore
-        except KeyError as e:
-            raise ValueError(f"Unknown value {name} for enum {cls.__name__}") from e
 
 
 def _pack_fmt(proto_type: str) -> str:
@@ -909,7 +884,7 @@ class Message(ABC):
                 return t
         elif issubclass(t, Enum):
             # Enums always default to zero.
-            return int
+            return t.try_value
         elif t is datetime:
             # Offsets are relative to 1970-01-01T00:00:00Z
             return datetime_default_gen
@@ -934,6 +909,8 @@ class Message(ABC):
             elif meta.proto_type == TYPE_BOOL:
                 # Booleans use a varint encoding, so convert it to true/false.
                 value = value > 0
+            elif meta.proto_type == TYPE_ENUM:
+                value = self._betterproto.cls_by_field[field_name].try_value(value)
         elif wire_type in (WIRE_FIXED_32, WIRE_FIXED_64):
             fmt = _pack_fmt(meta.proto_type)
             value = struct.unpack(fmt, value)[0]
@@ -1486,7 +1463,6 @@ class Message(ABC):
         field_name_to_meta = cls._betterproto_meta.meta_by_field_name  # type: ignore
 
         for group, field_set in group_to_one_ofs.items():
-
             if len(field_set) == 1:
                 (field,) = field_set
                 field_name = field.name
